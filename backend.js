@@ -146,7 +146,7 @@ app.post('/beleptetes', (req, res) => {
 app.post('/meccseredmenyFelvitel', (req, res) => {
   kapcsolat()
   connection.query(`
-  INSERT INTO meccseredmeny  VALUES (NULL, '2',  ?, '2-1', ?, 'Boti', '?', '43', '34', '23', '32', '?', '?', '1', '10', ?);
+  INSERT INTO meccseredmeny  VALUES (NULL, '2',  ?, '2-1', ?, 'Boti', ?, '43', '34', '23', '32', ?, ?, '1', '10', ?);
     
     `, [req.body.date,req.body.winner,req.body.avgPoints,req.body.highestCheckout,req.body.setsWon,req.body.dartsThrown], (err, rows, fields) => {
     if (err) {
