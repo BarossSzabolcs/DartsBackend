@@ -1,6 +1,5 @@
 const express = require('express')
 const mysql = require('mysql')
-const bcrypt = require('bcryptjs');
 var cors = require('cors')
 const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser');
@@ -64,6 +63,24 @@ app.get('/elsomeccslekerdez', (req, res) => {
   })
   connection.end()
 })
+//DIAGRAMHOZ WEBRE
+app.get('/diagramLekerdez', (req, res) => {
+  kapcsolat()
+  connection.query(`SELECT 
+  felhasznalo_nev,
+  COUNT(felhasznalo.felhasznalo_nev) AS Belepesek,
+  id
+  from belepesek 
+  INNER JOIN felhasznalo 
+  ON felhasznalo.felhasznalo_id = belepesek.belepesek_felhasznalo
+  GROUP BY felhasznalo.felhasznalo_nev;`, (err, rows, fields) => {
+    if (err) throw err
+
+    console.log(rows)
+    res.send(rows)
+  })
+  connection.end()
+})
 
 // ------------------- Regisztráció
 app.post('/regisztracio', (req, res) => {
@@ -112,7 +129,8 @@ app.post('/regisztracio', (req, res) => {
   connection.end();
 });
 
-// ------------------- Bejelentkezés
+const bcrypt = require('bcryptjs');
+/*
 app.post('/beleptetes', (req, res) => {
   const { bevitel1, bevitel2 } = req.body;
 
@@ -129,14 +147,56 @@ app.post('/beleptetes', (req, res) => {
           res.status(400).send('Felhasználó nem található!');
         } else {
           const hashedPassword = rows[0].felhasznalo_jelszo;
-          
-          // Compare the provided password with the hashed one
+
+          // Jelszó ellenőrzése
           bcrypt.compare(bevitel2, hashedPassword, (err, isMatch) => {
             if (err) {
               console.log(err);
               res.status(500).send('Hiba a jelszó összehasonlítás során');
             } else if (isMatch) {
-              res.status(200).send(rows);
+              const felhasznalo_id = rows[0].felhasznalo_id;
+
+              // Megnézzük, van-e már belépési rekord
+              connection.query(
+                'SELECT * FROM belepesek WHERE belepesek_felhasznalo = ?',
+                [felhasznalo_id],
+                (err, result) => {
+                  if (err) {
+                    console.log(err);
+                    res.status(500).send('Hiba történt a belépés rekord lekérdezésekor');
+                  } else {
+                    if (result.length > 0) {
+                      // Létezik rekord, frissítjük a belépések számát
+                      connection.query(
+                        'UPDATE belepesek SET belepesek_darabszam = belepesek_darabszam + 1 WHERE belepesek_felhasznalo = ?',
+                        [felhasznalo_id],
+                        (err, updateResult) => {
+                          if (err) {
+                            console.log(err);
+                            res.status(500).send('Hiba történt a belépés rekord frissítésekor');
+                          } else {
+                            res.status(200).send('Belépés sikeres, belépések száma növelve');
+                          }
+                        }
+                      );
+                    } else {
+                      // Nincs még rekord, beszúrunk egy újat
+                      connection.query(
+                        'INSERT INTO belepesek (belepesek_felhasznalo, belepesek_darabszam) VALUES (?, ?)',
+                        [felhasznalo_id, 1],
+                        (err, insertResult) => {
+                          if (err) {
+                            console.log(err);
+                            res.status(500).send('Hiba történt a belépés rekord beszúrásakor');
+                          } else {
+                            res.status(200).send('Belépés sikeres, új rekord létrehozva');
+                          }
+                        }
+                      );
+                    }
+                  }
+                }
+              );
             } else {
               res.status(400).send('Hibás jelszó');
             }
@@ -145,6 +205,63 @@ app.post('/beleptetes', (req, res) => {
       }
     }
   );
+  connection.end();
+});*/
+
+
+//BEJELENTKEZÉS BIZTONSÁI MÁSOLAT
+// ------------------- Bejelentkezés
+
+app.post('/beleptetes', (req, res) => {
+
+  const { bevitel1, bevitel2 } = req.body;
+
+  kapcsolat();
+
+  connection.query(
+    'SELECT felhasznalo_id, felhasznalo_nev, felhasznalo_jelszo FROM felhasznalo WHERE felhasznalo_nev = ?',
+    [bevitel1],
+    (err, rows, fields) => {
+      if (err) {
+        console.log(err);
+        res.status(500).send([]);
+      } else {
+        if (rows.length === 0) {
+          res.status(400).send('Felhasználó nem található!');
+        } else {
+          const hashedPassword = rows[0].felhasznalo_jelszo;
+          
+          bcrypt.compare(bevitel2, hashedPassword, (err, isMatch) => {
+            if (err) {
+              console.log(err);
+              res.status(500).send('Hiba a jelszó összehasonlítás során');
+            } else if (isMatch) {
+              const felhasznalo_id = rows[0].felhasznalo_id;
+              const datum = new Date().toISOString().slice(0, 19).replace('T', ' '); // Aktuális dátum formázása
+
+              // FELVITEL a belépések táblába
+              kapcsolat()
+              connection.query(
+                `INSERT INTO belepesek VALUES (NULL,? , ?)`,
+                [felhasznalo_id, datum],
+                (err, result) => {
+                  if (err) {
+                    console.log('Hiba a belépések táblába való beszúrás során:', err);
+                    res.status(500).send('Hiba a belépési adatok rögzítésekor');
+                  } else {
+                    res.status(200).send(rows);
+                  }
+                }
+              );
+            } else {
+              res.status(400).send('Hibás jelszó');
+            }
+          });
+        }
+      }
+    }
+  );
+
   connection.end();
 });
 
@@ -206,11 +323,73 @@ app.post('/web/login', (req, res) => {
   connection.end();
 });
 
+app.post('/update-rank', (req, res) => {
+  const { user_id, new_rank } = req.body;
+
+  // Logoljuk, hogy mi érkezik a kérésben
+  console.log(`Received - User ID: ${user_id}, New Rank: ${new_rank}`);
+
+  // Ellenőrizzük a bemeneti adatokat
+  if (typeof user_id === 'undefined' || ![0, 1].includes(new_rank)) {
+    console.error('Hibás bemenet:', req.body);  // Logging the received data
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+
+  kapcsolat();  // MySQL kapcsolat létrehozása
+
+  // SQL lekérdezés a rang frissítésére
+  connection.query(
+    'UPDATE rang SET rang_ertek = ?  WHERE rang_felhasznalo = ? ',
+    [new_rank, user_id],  // Az új rang és a felhasználó azonosítója
+    (err, result) => {
+      if (err) {
+        console.error('Database error:', err);  // Hibák naplózása
+        return res.status(500).json({ error: 'Database error' });
+      } else {
+        console.log('Rank updated successfully:', result);  // Sikeres frissítés naplózása
+        return res.status(200).json({ message: 'Rank updated successfully' });
+      }
+    }
+  );
+
+  connection.end();  // Kapcsolat lezárása
+});
 
 
 
 
 
+
+
+app.get('/felhasznalok-rangjai', (req, res) => {
+  kapcsolat();
+  connection.query(`
+  SELECT * FROM felhasznalo LEFT JOIN rang ON rang_felhasznalo = felhasznalo_id
+  `, (err, rows) => {
+    if (err) {
+      console.error('Hiba a lekérdezés során:', err);
+      res.status(500).json({ message: 'Szerverhiba' });
+    } else {
+      res.json(rows);  // Visszaküldjük a felhasználókat és a rangjaikat
+    }
+  });
+  connection.end();
+});
+
+app.get('/felhasznalokLekerdez', (req, res) => {
+  kapcsolat();
+  connection.query(`
+  SELECT  felhasznalo_nev FROM felhasznalo 
+  `, (err, rows) => {
+    if (err) {
+      console.error('Hiba a lekérdezés során:', err);
+      res.status(500).json({ message: 'Szerverhiba' });
+    } else {
+      res.json(rows);  
+    }
+  });
+  connection.end();
+});
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`)
